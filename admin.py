@@ -22,6 +22,13 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
 # Roles that must have a scope assigned
 SCOPED_ROLES = {"region_manager", "cluster_manager", "branch_manager", "agent"}
 
+# Scope type → model map for existence validation
+SCOPE_MODEL_MAP = {
+    "region":  Region,
+    "cluster": Cluster,
+    "branch":  Branch,
+}
+
 # Reusable super_admin guard
 super_admin = Depends(require_role("super_admin"))
 
@@ -33,6 +40,13 @@ def _get_or_404(db: Session, model, record_id: int, label: str):
     if not obj:
         raise HTTPException(404, f"{label} not found")
     return obj
+
+
+def _validate_scope(db: Session, scope_type: str, scope_id: int):
+    """Verify the scope entity actually exists."""
+    model = SCOPE_MODEL_MAP.get(scope_type)
+    if model:
+        _get_or_404(db, model, scope_id, scope_type.capitalize())
 
 
 # ── Roles ─────────────────────────────────────────────────────────────────────
@@ -193,7 +207,8 @@ def assign_branch_manager(branch_id: int, data: AssignBranchManager, db: Session
     if user.role.name != "branch_manager":
         raise HTTPException(400, "User must have the branch_manager role")
 
-    if str(user.scope_type) != "branch" or user.scope_id != branch_id:
+    # scope_type is a str Enum — compare value directly, no str() wrapping
+    if user.scope_type != "branch" or user.scope_id != branch_id:
         raise HTTPException(400, "User is not scoped to this branch")
 
     branch.branch_manager_id = user.id
@@ -328,7 +343,6 @@ def update_scheme(scheme_id: int, data: SchemeUpdate, db: Session = Depends(get_
 @router.post("/schemes/{scheme_id}/slabs", response_model=SchemeOut)
 def add_tenure_slab(scheme_id: int, data: TenureSlabIn, db: Session = Depends(get_db), _=super_admin):
     scheme = _get_or_404(db, Scheme, scheme_id, "Scheme")
-    # Prevent duplicate label on same scheme
     exists = db.query(TenureSlab).filter(
         TenureSlab.scheme_id == scheme_id,
         TenureSlab.tenure_label == data.tenure_label
@@ -424,15 +438,20 @@ def create_user(
     if role.name == "super_admin" and (data.scope_type or data.scope_id):
         raise HTTPException(400, "Super admin cannot have an org scope")
 
+    # Verify the scope entity actually exists before creating the user
+    if data.scope_type and data.scope_id:
+        _validate_scope(db, data.scope_type, data.scope_id)
+
     user = User(
-        role_id       = data.role_id,
-        full_name     = data.full_name,
-        email         = data.email,
-        phone         = data.phone,
-        password_hash = hash_password(data.temp_password),
-        scope_type    = data.scope_type,
-        scope_id      = data.scope_id,
-        created_by    = current_user.id,
+        role_id              = data.role_id,
+        full_name            = data.full_name,
+        email                = data.email,
+        phone                = data.phone,
+        password_hash        = hash_password(data.temp_password),
+        scope_type           = data.scope_type,
+        scope_id             = data.scope_id,
+        must_change_password = True,   # always force password change on first login
+        created_by           = current_user.id,
     )
     db.add(user)
     db.commit()
@@ -476,8 +495,19 @@ def get_user(user_id: int, db: Session = Depends(get_db), _=super_admin):
 @router.patch("/users/{user_id}", response_model=UserOut)
 def update_user(user_id: int, data: UserUpdate, db: Session = Depends(get_db), _=super_admin):
     user = _get_or_404(db, User, user_id, "User")
-    for field, value in data.model_dump(exclude_none=True).items():
+
+    # If scope is being updated, validate the new scope entity exists
+    update_data = data.model_dump(exclude_none=True)
+    new_scope_type = update_data.get("scope_type", user.scope_type)
+    new_scope_id   = update_data.get("scope_id",   user.scope_id)
+
+    if "scope_type" in update_data or "scope_id" in update_data:
+        if new_scope_type and new_scope_id:
+            _validate_scope(db, str(new_scope_type), new_scope_id)
+
+    for field, value in update_data.items():
         setattr(user, field, value)
+
     db.commit()
     db.refresh(user)
     return user
@@ -495,6 +525,8 @@ def toggle_active(user_id: int, db: Session = Depends(get_db), _=super_admin):
 @router.patch("/users/{user_id}/reset-password")
 def reset_password(user_id: int, data: UserResetPassword, db: Session = Depends(get_db), _=super_admin):
     user = _get_or_404(db, User, user_id, "User")
-    user.password_hash = hash_password(data.new_password)
+    user.password_hash        = hash_password(data.new_password)
+    # Force password change again — admin set this, user must update it
+    user.must_change_password = True
     db.commit()
     return {"message": f"Password reset for {user.email}"}

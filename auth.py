@@ -4,9 +4,9 @@ from sqlalchemy.orm import Session
 from jose import JWTError
 from database import get_db
 from dependencies import get_current_user
-from security import verify_password, create_access_token, create_refresh_token, decode_token
+from security import verify_password, hash_password, create_access_token, create_refresh_token, decode_token
 from models import User, UserSession
-from schemas import LoginRequest, RefreshRequest, LogoutRequest
+from schemas import LoginRequest, RefreshRequest, LogoutRequest, ChangePasswordRequest
 from config import settings
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -24,7 +24,7 @@ def _login(db: Session, email: str, password: str) -> dict:
         "sub":        str(user.id),
         "role":       user.role.name,
         "role_level": user.role.level,
-        "scope_type": str(user.scope_type) if user.scope_type else None,
+        "scope_type": user.scope_type if user.scope_type else None,
         "scope_id":   user.scope_id,
     }
 
@@ -40,14 +40,15 @@ def _login(db: Session, email: str, password: str) -> dict:
     db.commit()
 
     return {
-        "access_token":  access_token,
-        "refresh_token": refresh_token,
+        "access_token":        access_token,
+        "refresh_token":       refresh_token,
+        "must_change_password": user.must_change_password,
         "user": {
             "id":         user.id,
             "full_name":  user.full_name,
             "email":      user.email,
             "role":       user.role.name,
-            "scope_type": str(user.scope_type) if user.scope_type else None,
+            "scope_type": user.scope_type if user.scope_type else None,
             "scope_id":   user.scope_id,
         }
     }
@@ -112,10 +113,31 @@ def logout(body: LogoutRequest, db: Session = Depends(get_db)):
 @router.get("/me")
 def me(current_user: User = Depends(get_current_user)):
     return {
-        "id":         current_user.id,
-        "full_name":  current_user.full_name,
-        "email":      current_user.email,
-        "role":       current_user.role.name,
-        "scope_type": str(current_user.scope_type) if current_user.scope_type else None,
-        "scope_id":   current_user.scope_id,
+        "id":                  current_user.id,
+        "full_name":           current_user.full_name,
+        "email":               current_user.email,
+        "role":                current_user.role.name,
+        "scope_type":          current_user.scope_type if current_user.scope_type else None,
+        "scope_id":            current_user.scope_id,
+        "must_change_password": current_user.must_change_password,
     }
+
+
+@router.post("/change-password")
+def change_password(
+    body: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Authenticated user changes their own password. Clears the must_change_password flag."""
+    if not verify_password(body.current_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    if body.current_password == body.new_password:
+        raise HTTPException(status_code=400, detail="New password must differ from current password")
+
+    current_user.password_hash        = hash_password(body.new_password)
+    current_user.must_change_password = False
+    db.commit()
+
+    return {"message": "Password changed successfully"}

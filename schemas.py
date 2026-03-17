@@ -28,6 +28,10 @@ class TokenResponse(BaseModel):
     refresh_token: str
     user:          dict
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password:     str
+
 
 # ── Role ──────────────────────────────────────────────────────────────────────
 
@@ -405,14 +409,15 @@ class UserResetPassword(BaseModel):
     new_password: str
 
 class UserOut(BaseModel):
-    id:         int
-    full_name:  str
-    email:      str
-    phone:      Optional[str]
-    is_active:  bool
-    scope_type: Optional[str]
-    scope_id:   Optional[int]
-    role:       RoleOut
+    id:                   int
+    full_name:            str
+    email:                str
+    phone:                Optional[str]
+    is_active:            bool
+    scope_type:           Optional[str]
+    scope_id:             Optional[int]
+    must_change_password: bool
+    role:                 RoleOut
 
     class Config:
         from_attributes = True

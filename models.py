@@ -3,6 +3,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 from database import Base
 
 
@@ -31,8 +32,8 @@ class Region(Base):
     name       = Column(String(100), nullable=False, unique=True)
     code       = Column(String(20),  nullable=False, unique=True)
     is_active  = Column(Boolean,     nullable=False, default=True)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("NOW()"))
-    updated_at = Column(TIMESTAMP(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
 
     clusters   = relationship("Cluster", back_populates="region")
 
@@ -45,8 +46,8 @@ class Cluster(Base):
     name       = Column(String(100), nullable=False)
     code       = Column(String(20),  nullable=False, unique=True)
     is_active  = Column(Boolean,     nullable=False, default=True)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("NOW()"))
-    updated_at = Column(TIMESTAMP(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
 
     region   = relationship("Region",  back_populates="clusters")
     branches = relationship("Branch",  back_populates="cluster")
@@ -62,8 +63,8 @@ class Branch(Base):
     address           = Column(String,      nullable=True)
     is_active         = Column(Boolean,     nullable=False, default=True)
     branch_manager_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    created_at        = Column(TIMESTAMP(timezone=True), server_default=text("NOW()"))
-    updated_at        = Column(TIMESTAMP(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
+    created_at        = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at        = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
 
     cluster        = relationship("Cluster", back_populates="branches")
     branch_manager = relationship("User", foreign_keys=[branch_manager_id])
@@ -74,18 +75,20 @@ class Branch(Base):
 class User(Base):
     __tablename__ = "users"
 
-    id            = Column(Integer, primary_key=True)
-    role_id       = Column(Integer, ForeignKey("roles.id"), nullable=False)
-    full_name     = Column(String(150), nullable=False)
-    email         = Column(String(150), nullable=False, unique=True)
-    phone         = Column(String(20),  nullable=True)
-    password_hash = Column(String,      nullable=False)
-    scope_type    = Column(org_scope_enum, nullable=True)  # NULL for super_admin
-    scope_id      = Column(Integer,        nullable=True)  # FK resolved at app level
-    is_active     = Column(Boolean,  nullable=False, default=True)
-    created_by    = Column(Integer,  ForeignKey("users.id"), nullable=True)
-    created_at    = Column(TIMESTAMP(timezone=True), server_default=text("NOW()"))
-    updated_at    = Column(TIMESTAMP(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
+    id                  = Column(Integer, primary_key=True)
+    role_id             = Column(Integer, ForeignKey("roles.id"), nullable=False)
+    full_name           = Column(String(150), nullable=False)
+    email               = Column(String(150), nullable=False, unique=True)
+    phone               = Column(String(20),  nullable=True)
+    password_hash       = Column(String,      nullable=False)
+    scope_type          = Column(org_scope_enum, nullable=True)  # NULL for super_admin
+    scope_id            = Column(Integer,        nullable=True)  # FK resolved at app level
+    is_active           = Column(Boolean, nullable=False, default=True)
+    # Forces password change on first login after admin creates/resets the account
+    must_change_password = Column(Boolean, nullable=False, default=True)
+    created_by          = Column(Integer,  ForeignKey("users.id"), nullable=True)
+    created_at          = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at          = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
 
     role    = relationship("Role", back_populates="users")
     creator = relationship("User", remote_side="User.id", foreign_keys=[created_by])
@@ -163,8 +166,8 @@ class Scheme(Base):
 
     is_active  = Column(Boolean,  nullable=False, default=True)
     created_by = Column(Integer,  ForeignKey("users.id"), nullable=False)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=text("NOW()"))
-    updated_at = Column(TIMESTAMP(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
 
     tenure_slabs = relationship("TenureSlab",    back_populates="scheme", cascade="all, delete-orphan")
     criteria     = relationship("SchemeCriteria", back_populates="scheme", cascade="all, delete-orphan")
@@ -225,6 +228,6 @@ class UserSession(Base):
     user_agent    = Column(String,     nullable=True)
     expires_at    = Column(TIMESTAMP(timezone=True), nullable=False)
     revoked_at    = Column(TIMESTAMP(timezone=True), nullable=True)  # NULL = active
-    created_at    = Column(TIMESTAMP(timezone=True), server_default=text("NOW()"))
+    created_at    = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     user = relationship("User")
